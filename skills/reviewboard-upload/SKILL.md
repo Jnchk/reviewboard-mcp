@@ -9,7 +9,8 @@ Review Board request descriptions, "testing done" and review bodies are often lo
 the gateway and pass the returned id; only the id crosses the model context.
 
 ```bash
-python3 ~/.config/opencode/skills/mcp-upload/scripts/mcp_upload.py --server reviewboard --path ./description.md
+# run from the root of your mcp-gateway clone
+python3 skills/mcp-upload/scripts/mcp_upload.py --server reviewboard --path ./description.md
 # 9f1c0b7a4e2d4c3b8a5f6e7d0c1b2a39
 ```
 
