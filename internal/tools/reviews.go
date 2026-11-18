@@ -162,12 +162,14 @@ type diffCommentIn struct {
 }
 
 type createReviewIn struct {
-	ID              int                `json:"id" jsonschema:"review request id"`
-	BodyTop         string             `json:"body_top,omitempty" jsonschema:"review text above the comments"`
-	BodyBottom      string             `json:"body_bottom,omitempty" jsonschema:"review text below the comments"`
-	ShipIt          bool               `json:"ship_it,omitempty" jsonschema:"mark Ship It!"`
-	GeneralComments []generalCommentIn `json:"general_comments,omitempty" jsonschema:"general comments"`
-	DiffComments    []diffCommentIn    `json:"diff_comments,omitempty" jsonschema:"inline comments on file diffs"`
+	ID                 int                `json:"id" jsonschema:"review request id"`
+	BodyTop            string             `json:"body_top,omitempty" jsonschema:"review text above the comments; required unless body_top_upload_id is set"`
+	BodyBottom         string             `json:"body_bottom,omitempty" jsonschema:"review text below the comments; required unless body_bottom_upload_id is set"`
+	BodyTopUploadID    string             `json:"body_top_upload_id,omitempty" jsonschema:"id from POST /upload; use instead of body_top for large text"`
+	BodyBottomUploadID string             `json:"body_bottom_upload_id,omitempty" jsonschema:"id from POST /upload; use instead of body_bottom for large text"`
+	ShipIt             bool               `json:"ship_it,omitempty" jsonschema:"mark Ship It!"`
+	GeneralComments    []generalCommentIn `json:"general_comments,omitempty" jsonschema:"general comments"`
+	DiffComments       []diffCommentIn    `json:"diff_comments,omitempty" jsonschema:"inline comments on file diffs"`
 }
 
 func (d *Deps) createReview(ctx context.Context, in createReviewIn) (string, error) {
@@ -177,11 +179,19 @@ func (d *Deps) createReview(ctx context.Context, in createReviewIn) (string, err
 	if in.ID <= 0 {
 		return "", fmt.Errorf("reviewboard: id is required")
 	}
-	if strings.TrimSpace(in.BodyTop) == "" && strings.TrimSpace(in.BodyBottom) == "" && !in.ShipIt &&
+	bodyTop, err := d.resolveUpload("body_top", in.BodyTop, in.BodyTopUploadID)
+	if err != nil {
+		return "", err
+	}
+	bodyBottom, err := d.resolveUpload("body_bottom", in.BodyBottom, in.BodyBottomUploadID)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(bodyTop) == "" && strings.TrimSpace(bodyBottom) == "" && !in.ShipIt &&
 		len(in.GeneralComments) == 0 && len(in.DiffComments) == 0 {
 		return "", fmt.Errorf("reviewboard: empty review: add body text, ship_it, or at least one comment")
 	}
-	input := reviewboard.ReviewInput{BodyTop: in.BodyTop, BodyBottom: in.BodyBottom, ShipIt: in.ShipIt}
+	input := reviewboard.ReviewInput{BodyTop: bodyTop, BodyBottom: bodyBottom, ShipIt: in.ShipIt}
 	for i, c := range in.DiffComments {
 		if c.FilediffID <= 0 {
 			return "", fmt.Errorf("reviewboard: diff_comments[%d].filediff_id is required; get it from get_diff", i)
@@ -212,6 +222,7 @@ func (d *Deps) createReview(ctx context.Context, in createReviewIn) (string, err
 	if err != nil {
 		return "", err
 	}
+	d.consumeUploads(in.BodyTopUploadID, in.BodyBottomUploadID)
 	return fmt.Sprintf("#%d review %d posted (ship_it: %t, %d general, %d diff comments). %s",
 		in.ID, rid, in.ShipIt, len(in.GeneralComments), len(in.DiffComments), d.reviewURL(in.ID, rid)), nil
 }

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"reviewboard-mcp/internal/reviewboard"
+	"reviewboard-mcp/internal/staging"
 )
 
 type fakeState struct {
@@ -314,5 +316,64 @@ func TestRawMode(t *testing.T) {
 	out, isErr := call(t, cs, "get_review_request", map[string]any{"id": 42, "raw": true})
 	if isErr || !strings.Contains(out, `"summary"`) {
 		t.Fatalf("raw: %q (error=%t)", out, isErr)
+	}
+}
+
+func TestCreateReviewRequestFromUpload(t *testing.T) {
+	srv, st := fakeRB(t)
+	c, _ := reviewboard.New(srv.URL, "secret", time.Second, false, 1<<20)
+	store, err := staging.New(t.TempDir(), time.Minute, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := store.Stage(strings.NewReader("# 大段描述\n\n正文内容\n"), "desc.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d := &Deps{C: c, M: reviewboard.NewMeta(c, time.Minute), Staging: store, DefaultLimit: 25, TextType: "markdown"}
+	cs := connect(t, d)
+
+	out, isErr := call(t, cs, "create_review_request", map[string]any{
+		"repository": "web-svn", "summary": "from upload", "description_upload_id": info.ID,
+	})
+	if isErr || !strings.Contains(out, "#42") {
+		t.Fatalf("create_review_request: %q (error=%t)", out, isErr)
+	}
+	joined := strings.Join(st.draftPuts, "\n")
+	if !strings.Contains(joined, "大段描述") {
+		t.Fatalf("uploaded body missing from draft: %s", joined)
+	}
+	if _, err := store.Read(info.ID); !errors.Is(err, staging.ErrNotFound) {
+		t.Fatalf("upload id not consumed: %v", err)
+	}
+}
+
+func TestResolveUpload(t *testing.T) {
+	store, err := staging.New(t.TempDir(), time.Minute, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := store.Stage(strings.NewReader("staged body"), "x.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d := &Deps{Staging: store}
+	got, err := d.resolveUpload("description", "", info.ID)
+	if err != nil || got != "staged body" {
+		t.Fatalf("resolve = %q, %v", got, err)
+	}
+	if got, err := d.resolveUpload("description", "inline", ""); err != nil || got != "inline" {
+		t.Fatalf("inline = %q, %v", got, err)
+	}
+	if _, err := d.resolveUpload("description", "inline", info.ID); err == nil {
+		t.Fatal("expected an error when both inline text and an id are set")
+	}
+	if _, err := d.resolveUpload("description", "", "unknown"); err == nil {
+		t.Fatal("expected an error for an unknown id")
+	}
+	if _, err := (&Deps{}).resolveUpload("description", "", info.ID); err == nil {
+		t.Fatal("expected an error when staging is disabled")
 	}
 }

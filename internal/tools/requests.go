@@ -187,16 +187,18 @@ func (d *Deps) renderRequest(ctx context.Context, r *reviewboard.ReviewRequest) 
 }
 
 type createRequestIn struct {
-	Repository   string `json:"repository" jsonschema:"repository name, path or id (required)"`
-	Summary      string `json:"summary" jsonschema:"review request summary (required)"`
-	Description  string `json:"description,omitempty" jsonschema:"description, markdown"`
-	TestingDone  string `json:"testing_done,omitempty" jsonschema:"testing done, markdown"`
-	Branch       string `json:"branch,omitempty" jsonschema:"branch name"`
-	BugsClosed   string `json:"bugs_closed,omitempty" jsonschema:"comma-separated bug ids"`
-	TargetPeople string `json:"target_people,omitempty" jsonschema:"comma-separated reviewer usernames, full names or ids"`
-	TargetGroups string `json:"target_groups,omitempty" jsonschema:"comma-separated review group names or ids"`
-	CommitID     string `json:"commit_id,omitempty" jsonschema:"commit id the change is based on"`
-	Publish      *bool  `json:"publish,omitempty" jsonschema:"publish the draft (default true)"`
+	Repository          string `json:"repository" jsonschema:"repository name, path or id (required)"`
+	Summary             string `json:"summary" jsonschema:"review request summary (required)"`
+	Description         string `json:"description,omitempty" jsonschema:"description, markdown; required unless description_upload_id is set"`
+	TestingDone         string `json:"testing_done,omitempty" jsonschema:"testing done, markdown; required unless testing_done_upload_id is set"`
+	DescriptionUploadID string `json:"description_upload_id,omitempty" jsonschema:"id from POST /upload; use instead of description for large text"`
+	TestingDoneUploadID string `json:"testing_done_upload_id,omitempty" jsonschema:"id from POST /upload; use instead of testing_done for large text"`
+	Branch              string `json:"branch,omitempty" jsonschema:"branch name"`
+	BugsClosed          string `json:"bugs_closed,omitempty" jsonschema:"comma-separated bug ids"`
+	TargetPeople        string `json:"target_people,omitempty" jsonschema:"comma-separated reviewer usernames, full names or ids"`
+	TargetGroups        string `json:"target_groups,omitempty" jsonschema:"comma-separated review group names or ids"`
+	CommitID            string `json:"commit_id,omitempty" jsonschema:"commit id the change is based on"`
+	Publish             *bool  `json:"publish,omitempty" jsonschema:"publish the draft (default true)"`
 }
 
 func (d *Deps) createReviewRequest(ctx context.Context, in createRequestIn) (string, error) {
@@ -209,6 +211,14 @@ func (d *Deps) createReviewRequest(ctx context.Context, in createRequestIn) (str
 	if strings.TrimSpace(in.Summary) == "" {
 		return "", fmt.Errorf("reviewboard: summary is required")
 	}
+	description, err := d.resolveUpload("description", in.Description, in.DescriptionUploadID)
+	if err != nil {
+		return "", err
+	}
+	testingDone, err := d.resolveUpload("testing_done", in.TestingDone, in.TestingDoneUploadID)
+	if err != nil {
+		return "", err
+	}
 	repo, err := d.M.Repository(ctx, in.Repository)
 	if err != nil {
 		return "", err
@@ -219,12 +229,12 @@ func (d *Deps) createReviewRequest(ctx context.Context, in createRequestIn) (str
 	}
 
 	fields := map[string]any{"summary": in.Summary}
-	if in.Description != "" {
-		fields["description"] = in.Description
+	if description != "" {
+		fields["description"] = description
 		fields["description_text_type"] = d.TextType
 	}
-	if in.TestingDone != "" {
-		fields["testing_done"] = in.TestingDone
+	if testingDone != "" {
+		fields["testing_done"] = testingDone
 		fields["testing_done_text_type"] = d.TextType
 	}
 	if in.Branch != "" {
@@ -258,6 +268,7 @@ func (d *Deps) createReviewRequest(ctx context.Context, in createRequestIn) (str
 	if !publish {
 		state = "created as a draft (not published)"
 	}
+	d.consumeUploads(in.DescriptionUploadID, in.TestingDoneUploadID)
 	return fmt.Sprintf("#%d %s (%s, %s). %s", rr.ID, state, repo.Name, format.Truncate(in.Summary, 120), d.C.ReviewRequestURL(rr.ID)), nil
 }
 

@@ -9,12 +9,14 @@ import (
 
 	"reviewboard-mcp/internal/format"
 	"reviewboard-mcp/internal/reviewboard"
+	"reviewboard-mcp/internal/staging"
 )
 
 // Deps is everything the tools need. One Deps belongs to one Review Board server.
 type Deps struct {
 	C            *reviewboard.Client
 	M            *reviewboard.Meta
+	Staging      *staging.Store
 	ReadOnly     bool
 	DefaultLimit int
 	TextType     string // markdown | plain, sent as *_text_type

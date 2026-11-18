@@ -114,3 +114,18 @@ Client config (opencode, stdio):
 - Screenshots, file attachments, webhooks, extensions and OAuth2 are out of scope.
 - The code has not yet been exercised against a live Review Board; the first `whoami` and a disposable review
   request are the verification step (`docs/00_basic_design.md` §12).
+
+## Large text (staging upload)
+
+`create_review_request` and `create_review` accept `*_upload_id` fields instead of inline text, so long
+descriptions, "testing done" and review bodies never travel through the model context:
+
+1. `POST /upload?filename=description.md` with the same bearer token as MCP and
+   `Content-Type: application/octet-stream`; the response is `{"id": "...", "size": ..., "sha256": ...}`.
+2. Pass `description_upload_id`, `testing_done_upload_id`, `body_top_upload_id` or `body_bottom_upload_id`
+   to the tool.
+
+Ids are single-use, expire after 15 minutes, are bounded by `REVIEWBOARD_MAX_UPLOAD`, accept UTF-8 text
+only, and are consumed only when the write succeeds. The neutral `mcp-upload` helper in the `mcp-gateway`
+repository performs step 1. Diffs keep their own multipart `upload_diff` path.
+

@@ -18,6 +18,7 @@ import (
 
 	"reviewboard-mcp/internal/config"
 	"reviewboard-mcp/internal/reviewboard"
+	"reviewboard-mcp/internal/staging"
 	"reviewboard-mcp/internal/tools"
 )
 
@@ -74,12 +75,19 @@ func main() {
 	}
 	logger.Info("connected", "url", cfg.URL, "user", session.UserName(), "read_only", cfg.ReadOnly)
 
+	stagingStore, err := staging.New("", 15*time.Minute, cfg.MaxUpload)
+	if err != nil {
+		logger.Error("staging", "err", err)
+		os.Exit(1)
+	}
+
 	srv := mcp.NewServer(&mcp.Implementation{Name: "reviewboard-mcp", Version: version}, &mcp.ServerOptions{
 		Instructions: instructions(cfg, session.UserName()),
 	})
 	tools.Register(srv, &tools.Deps{
 		C:            client,
 		M:            reviewboard.NewMeta(client, cfg.MetaTTL),
+		Staging:      stagingStore,
 		ReadOnly:     cfg.ReadOnly,
 		DefaultLimit: cfg.DefaultLimit,
 		TextType:     cfg.TextType,
@@ -95,6 +103,9 @@ func main() {
 		)
 		mux := http.NewServeMux()
 		mux.Handle(cfg.Path, withToken(cfg.MCPToken, handler))
+		// POST /upload stages long text (description, testing done, review body)
+		// so it never has to travel through the model context.
+		mux.Handle("/upload", withToken(cfg.MCPToken, uploadHandler(stagingStore)))
 
 		// Bind every address up front so a bad one fails startup, not half the listeners.
 		var listeners []net.Listener
